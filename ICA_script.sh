@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # making project directory and changing it to our PWD
-mkdir ICA1
-cd ICA1
+mkdir ICA1_outputs
+cd ICA1_outputs
 
 # OPTIONAL – removing previous data from this folder if the script has previously been run – use with caution
-#rm ICA1/*
+#rm -r ICA1/*
 
 #1 run quality check on raw sequence data
 # copy the fastq files into PWD
@@ -19,7 +19,9 @@ fastqc -o fastqc_output fastq/*
 
 #2 assess the number and quality of the raw sequenced data
 # unzip all the zipped output files from qc
+cd fastqc_output
 unzip \*.zip
+cd ..
 
 # OPTIONAL – removing the .zip and .html files
 #rm fastqc_output/*.zip
@@ -38,7 +40,7 @@ summary_file="summary.txt"
 > "${fail_file}"
 
 # define the threshold for number of fails
-fail_threshold=3
+fail_threshold=4
 
 # loop through FastQC output folders
 for folder in "${output_dir}"/*_fastqc/; do
@@ -46,11 +48,11 @@ for folder in "${output_dir}"/*_fastqc/; do
     while IFS=$'\t' read -r line; do
         outcome_status=$(echo "${line}" | awk '{print $1}')
         if [ "${outcome_status}" == "PASS" ]; then
-            echo "${line}" >> "${output_dir}"/"${pass_file}"
+            echo "${line}" >> "${output_dir}/${pass_file}"
         elif [ "${outcome_status}" == "WARN" ]; then
-            echo "${line}" >> "${output_dir}"/"${warn_file}"
+            echo "${line}" >> "${output_dir}/${warn_file}"
         elif [ "$outcome_status" == "FAIL" ]; then
-            echo "${line}" >> "${output_dir}"/"${fail_file}"
+            echo "${line}" >> "${output_dir}/${fail_file}"
         fi
     done < "${folder}/summary.txt"
 
@@ -80,7 +82,7 @@ done
 # copy the reference genome into the PWD
 cp -r /localdisk/data/BPSM/ICA1/Tcongo_genome/ .
 # make the reference genome from the .fasta file copied from the above folder
-bowtie2-build Tcongo_genome/TriTrypDB-46_TcongolenseIL3000_2019_Genome.fasta Tconga_reference
+bowtie2-build Tcongo_genome/TriTrypDB-46_TcongolenseIL3000_2019_Genome.fasta.gz Tcongo_reference
 # move files into the Tcongo_reference_genome folder (not neccessary but makes it neater)
 mv Tcongo_reference.* Tcongo_genome
 
@@ -100,6 +102,8 @@ for file1 in fastq/*_1.fq.gz; do
     bowtie2 --local -x Tcongo_genome/Tcongo_reference -1 ${file1} -2 ${file2} -S alignment_output/${filename}.sam
     # convert .sam to .bam using samtools
     samtools view -bS "alignment_output/${filename}.sam" > "alignment_output/${filename}.bam"
+    # sort alignments by leftmost coordinates
+    samtools sort "alignment_output/${filename}.bam" -o "alignment_output/${filename}.sorted.bam"
 done
 
 
@@ -116,14 +120,48 @@ for file in alignment_output/*.sorted.bam; do
         filename="${filename%.sorted.bam}"
         output_file="${filename}_counts.txt"
 
-        bedtools coverage -a TriTrypDB-46_TcongolenseIL3000_2019.bed -b ${file} > "counts_data/${output_file}"
+        bedtools coverage -counts -a TriTrypDB-46_TcongolenseIL3000_2019.bed -b ${file} > "counts_data/${output_file}"
 done
 
 
 
 #5 generate output files of the statistical mean of the counts per gene for each group
 
+# separate the groups into different conditions
+input_dir="${PWD}/fastq"
+input_file="Tco2.fqfiles"
+mkdir combinations
 
+
+# read the header to get column names
+read -r header < "${input_dir}/${input_file}"
+
+declare -A output_files
+
+# read through each line of the file
+while IFS='' read -r line; do
+    SampleName=$(echo "$line" | cut -f1)
+    SampleType=$(echo "$line" | cut -f2)
+    Time=$(echo "$line" | cut -f4)
+    Treatment=$(echo "$line" | cut -f5)
+
+    # skip the header line
+    if [[ "$SampleName" == "SampleName" ]]; then
+        continue
+    fi
+
+    # specifiy the conditions
+    condition="${SampleType}_${Time}_${Treatment}"
+
+    # add the line to the corresponding output file
+    output_files["$condition"]+="$line\n"
+done < <(tail -n +2 "${input_dir}/${input_file}")
+
+# create the output files
+for condition in "${!output_files[@]}"; do
+    filename="${condition}.txt"
+    echo -e "${header}\n${output_files["$condition"]}" > "combinations/${filename}"
+done
 
 
 
