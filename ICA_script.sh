@@ -44,18 +44,6 @@ fail_threshold=4
 
 # loop through FastQC output folders
 for folder in "${output_dir}"/*_fastqc/; do
-    # read the summary file and add information to the appropriate output file for each line
-    while IFS=$'\t' read -r line; do
-        outcome_status=$(echo "${line}" | awk '{print $1}')
-        if [ "${outcome_status}" == "PASS" ]; then
-            echo "${line}" >> "${output_dir}/${pass_file}"
-        elif [ "${outcome_status}" == "WARN" ]; then
-            echo "${line}" >> "${output_dir}/${warn_file}"
-        elif [ "$outcome_status" == "FAIL" ]; then
-            echo "${line}" >> "${output_dir}/${fail_file}"
-        fi
-    done < "${folder}/summary.txt"
-
     # check if the summary file exists and contains 3 or more fails
     if [ -e "${folder}/${summary_file}" ]; then
         fails=$(grep -o "FAIL" "$folder/$summary_file" | wc -l)
@@ -99,7 +87,7 @@ for file1 in fastq/*_1.fq.gz; do
     filename="${filename%_1.fq.gz}" # removes the "_1.fq.gz" from filename leaving the sequence number
 
     # align the paired-end sequences using Bowtie2
-    bowtie2 --local -x Tcongo_genome/Tcongo_reference -1 ${file1} -2 ${file2} -S alignment_output/${filename}.sam
+    bowtie2 --local --threads 10  -x Tcongo_genome/Tcongo_reference -1 ${file1} -2 ${file2} -S alignment_output/${filename}.sam
     # convert .sam to .bam using samtools
     samtools view -bS "alignment_output/${filename}.sam" > "alignment_output/${filename}.bam"
     # sort alignments by leftmost coordinates
@@ -131,7 +119,7 @@ done
 input_dir="${PWD}/fastq"
 input_file="Tco2.fqfiles"
 mkdir combinations
-
+combos="${PWD}/combinations"
 
 # read the header to get column names
 read -r header < "${input_dir}/${input_file}"
@@ -163,8 +151,61 @@ for condition in "${!output_files[@]}"; do
     echo -e "${header}\n${output_files["$condition"]}" > "combinations/${filename}"
 done
 
+# add the counts information for each 
+
+# loop through files in the combinations directory
+for combination_file in "${combos}"/*.txt; do
+    condition=$(basename "$combination_file")
+    condition="${condition%.*}"
+
+    # create an empty file for each condition
+    touch "${combos}/${condition}_counts.txt"
+
+    while IFS="\n" read -r line; do
+        echo "Processing sample: ${sample_name}"
+
+    # get corresponding counts file   
+    counts_data="$counts_dir/${sample_name}_counts.txt"
+
+    output_file="${combos}/${condition}_counts"
+    touch "${output_file}"
+   
+       if [ -e "$counts_data" ]; then
+#                # append the last column from counts_data as a new column
+                awk '{print $NF}' "${counts_data}" > "${output_file}_temp.txt"
+                paste "${output_file}" "${output_file}_temp.txt" >> "${output_file}.txt"
+        else
+                        echo "Counts data file not found for sample: $SampleName"
+        fi
+   done < "${combination_file}"
+done
 
 
+#calculating the averages – commented out because it will not run properly – see write up
+#bed_file="${TriTrypDB-46_TcongolenseIL3000_2019.bed}"
+#out_file="${combination}_average.txt"
+
+# loop through each file in the folder
+#for file in "${combinations}"/*_counts.txt; do
+#    combos="${PWD}/combinations"
+    # check if the file is a regular file
+#    if [ -f "$file" ]; then
+        # define the output file with a similar name as input file
+#        output_file="${file%.*}_mean.txt"
+#        # calculate mean for each row in the file
+#        awk '{
+#            sum = 0;
+#            for (i = 1; i <= NF; i++) {
+#                sum += $i;
+#            }
+#            mean = sum / NF;
+#            print mean;
+#        }' "${file}" >> temp_file.txt
+#        # combine with columns the gene name and description from the .bed file
+#        paste temp_file.txt <(awk '{print $4, $5}' "${bed_file}") >> "${output_file}"
+#        rm temp_file.txt
+#    fi
+#done
 
 
 #6 generate fold change data
